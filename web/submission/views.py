@@ -31,7 +31,6 @@ from lib.cuckoo.common.web_utils import (
     download_file,
     download_from_3rdparty,
     downloader_services,
-    force_int,
     get_file_content,
     load_vms_exits,
     load_vms_tags,
