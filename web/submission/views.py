@@ -31,6 +31,7 @@ from lib.cuckoo.common.web_utils import (
     download_file,
     download_from_3rdparty,
     downloader_services,
+    force_int,
     get_file_content,
     load_vms_exits,
     load_vms_tags,
@@ -284,15 +285,6 @@ class conditional_login_required:
         if not self.condition:
             return func
         return self.decorator(func)
-
-
-def force_int(value):
-    try:
-        value = int(value)
-    except Exception:
-        value = 0
-    finally:
-        return value
 
 
 @conditional_login_required(login_required, settings.WEB_AUTHENTICATION)
