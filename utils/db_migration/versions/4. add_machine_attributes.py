@@ -8,15 +8,15 @@ Revision ID: 4a6c2b_machine_attributes
 Revises: 3a1b_tenant_visibility
 Create Date: 2026-09-01
 
-Adds a generic JSONB column to the machines table to hold per-machine
-semi-structured data (e.g. provider metadata, admin notes, runtime state)
-without requiring ALTER TABLE for each new field.
+Adds a generic JSONB column to the machines table to  store extra per-machine data - whether
+ generic (e.g. last shutdown date) or machinery-specific (e.g. VNC connection details)
+semi-structured data (e.g. provider metadata, admin notes, runtime state) - without
+ requiring ALTER TABLE for each new field.
 
 On Postgres the column is stored as real JSONB; on SQLite/MySQL it falls
 back to plain JSON.  Matches the Machine model which declares it with
 JSON().with_variant(JSONB(), "postgresql") so fresh installs on Postgres
 get the optimal type automatically via Base.metadata.create_all().
-Existing installs require this migration.
 """
 
 import sqlalchemy as sa

@@ -66,11 +66,7 @@ class Machine(Base):
     resultserver_port: Mapped[str] = mapped_column(String(255), nullable=False)
     reserved: Mapped[bool] = mapped_column(Boolean(), nullable=False, default=False)
 
-    # Generic key/value bag for per-machine semi-structured data: last_error,
-    # last_boot_on/last_shutdown_on and config_version (populated uniformly by
-    # base machinery), plus backend/provider data such as the VNC console URL
-    # or provider metadata (region, availability zone, hypervisor).  Changes to
-    # the dict are auto-tracked via MutableDict (no flag_modified needed).
+    # Generic key/value bag for per-machine semi-structured data
     attributes: Mapped[Optional[dict]] = mapped_column(
         MutableDict.as_mutable(JSON().with_variant(JSONB(), "postgresql")),
         nullable=True,
@@ -105,7 +101,7 @@ class Machine(Base):
     # ---- attributes helpers ----
 
     def get_attribute(self, key: str, default=None):
-        """Return an attribute value, or *default* if not set."""
+        """Return an attribute value, or default if not set."""
         if not self.attributes:
             return default
         return self.attributes.get(key, default)
@@ -113,9 +109,8 @@ class Machine(Base):
     def set_attribute(self, key: str, value) -> None:
         """Set an attribute.  Passing None removes the key.  Lazy-inits the dict.
 
-        MutableDict tracks changes automatically so no flag_modified is needed.
-        get_attribute / set_attribute are convenience wrappers; direct in-place
-        mutation (machine.attributes["k"] = v) is also fine.
+        set_attribute is convenience wrapper - MutableDict tracks changes automatically so
+        direct in-place mutation (machine.attributes["k"] = v) is also fine.
         """
         if self.attributes is None:
             self.attributes = {}
