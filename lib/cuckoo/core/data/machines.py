@@ -24,9 +24,9 @@ try:
         String,
     )
     from sqlalchemy.dialects.postgresql import JSONB
+    from sqlalchemy.ext.mutable import MutableDict
     from sqlalchemy.orm import (
         Mapped,
-        flag_modified,
         mapped_column,
         relationship,
         selectinload,
@@ -66,11 +66,13 @@ class Machine(Base):
     resultserver_port: Mapped[str] = mapped_column(String(255), nullable=False)
     reserved: Mapped[bool] = mapped_column(Boolean(), nullable=False, default=False)
 
-    # Generic key/value bag for per-machine semi-structured data.
-    # Use get_attribute / set_attribute for reads and writes.  Never mutate the dict in place — in-place changes
-    # are not detected by the ORM and will be silently lost on flush.  Reads via direct attribute access are fine.
+    # Generic key/value bag for per-machine semi-structured data: last_error,
+    # last_boot_on/last_shutdown_on and config_version (populated uniformly by
+    # base machinery), plus backend/provider data such as the VNC console URL
+    # or provider metadata (region, availability zone, hypervisor).  Changes to
+    # the dict are auto-tracked via MutableDict (no flag_modified needed).
     attributes: Mapped[Optional[dict]] = mapped_column(
-        JSON().with_variant(JSONB(), "postgresql"),
+        MutableDict.as_mutable(JSON().with_variant(JSONB(), "postgresql")),
         nullable=True,
         default=dict,
     )
@@ -109,10 +111,11 @@ class Machine(Base):
         return self.attributes.get(key, default)
 
     def set_attribute(self, key: str, value) -> None:
-        """Set an attribute.  Passing None removes the key.
+        """Set an attribute.  Passing None removes the key.  Lazy-inits the dict.
 
-        Always use this instead of mutating the dict in-place — in-place changes
-        are not detected by the ORM and will be silently lost on flush.
+        MutableDict tracks changes automatically so no flag_modified is needed.
+        get_attribute / set_attribute are convenience wrappers; direct in-place
+        mutation (machine.attributes["k"] = v) is also fine.
         """
         if self.attributes is None:
             self.attributes = {}
@@ -120,7 +123,6 @@ class Machine(Base):
             self.attributes.pop(key, None)
         else:
             self.attributes[key] = value
-        flag_modified(self, "attributes")
 
     def __init__(self, name, label, arch, ip, platform, interface, snapshot, resultserver_ip, resultserver_port, reserved):
         self.name = name
