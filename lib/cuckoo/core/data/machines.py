@@ -23,12 +23,15 @@ try:
         Select,
         String,
     )
+    from sqlalchemy.dialects.postgresql import JSONB
     from sqlalchemy.orm import (
         Mapped,
+        flag_modified,
         mapped_column,
         relationship,
         selectinload,
     )
+    from sqlalchemy.types import JSON
 
 except ImportError:  # pragma: no cover
     raise CuckooDependencyError("Unable to import sqlalchemy (install with `poetry install`)")
@@ -63,6 +66,15 @@ class Machine(Base):
     resultserver_port: Mapped[str] = mapped_column(String(255), nullable=False)
     reserved: Mapped[bool] = mapped_column(Boolean(), nullable=False, default=False)
 
+    # Generic key/value bag for per-machine semi-structured data.
+    # Use get_attribute / set_attribute for reads and writes.  Never mutate the dict in place — in-place changes
+    # are not detected by the ORM and will be silently lost on flush.  Reads via direct attribute access are fine.
+    attributes: Mapped[Optional[dict]] = mapped_column(
+        JSON().with_variant(JSONB(), "postgresql"),
+        nullable=True,
+        default=dict,
+    )
+
     def __repr__(self):
         return f"<Machine({self.id},'{self.name}')>"
 
@@ -87,6 +99,28 @@ class Machine(Base):
         @return: JSON data
         """
         return json.dumps(self.to_dict())
+
+    # ---- attributes helpers ----
+
+    def get_attribute(self, key: str, default=None):
+        """Return an attribute value, or *default* if not set."""
+        if not self.attributes:
+            return default
+        return self.attributes.get(key, default)
+
+    def set_attribute(self, key: str, value) -> None:
+        """Set an attribute.  Passing None removes the key.
+
+        Always use this instead of mutating the dict in-place — in-place changes
+        are not detected by the ORM and will be silently lost on flush.
+        """
+        if self.attributes is None:
+            self.attributes = {}
+        if value is None:
+            self.attributes.pop(key, None)
+        else:
+            self.attributes[key] = value
+        flag_modified(self, "attributes")
 
     def __init__(self, name, label, arch, ip, platform, interface, snapshot, resultserver_ip, resultserver_port, reserved):
         self.name = name
