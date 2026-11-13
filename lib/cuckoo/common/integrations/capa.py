@@ -11,6 +11,7 @@ from typing import Any, Dict, Set
 from lib.cuckoo.common.config import Config
 from lib.cuckoo.common.constants import CUCKOO_ROOT
 from lib.cuckoo.common.path_utils import path_exists, path_object
+from lib.cuckoo.common.process_timeout import ResultUnavailableError, run_with_timeout
 
 log = logging.getLogger(__name__)
 
@@ -247,10 +248,7 @@ def render_dictionary(doc) -> Dict[str, Any]:
     render_capabilities(doc, result)
     return result
 
-# ===== CAPA END
 
-
-# ==== render dictionary helpers
 def flare_capa_details(
     file_path: str,
     category: str = False,
@@ -272,44 +270,74 @@ def flare_capa_details(
             return malcat_capa_details(file_path, category=category, on_demand=on_demand, results=results)
         if not rules:
             return {}
-        # ToDo check if PE file in TYPE
+
+        # A timeout of 0 (or unset) means running without a deadline.
+        # On-demand (user-triggered) runs are deliberately never killed by a timeout.
+        timeout = 0 if on_demand else integrations_conf.flare_capa.timeout
         try:
-            file_path_object = path_object(file_path)
-            # extract features and find capabilities
-            if backend == "viv":
-                extractor = capa.loader.get_extractor(
-                    file_path_object, FORMAT_AUTO, OS_AUTO, capa.loader.BACKEND_VIV, [], False, disable_progress=disable_progress
-                )
-            elif backend == "cape" and results:
-                try:
-                    extractor = capa.features.extractors.cape.extractor.CapeExtractor.from_report(results)
-                except ValidationError as e:
-                    log.debug("CAPA ValidationError %s", e)
-                    return {}
+            if not timeout:
+                capa_output = _run_capa(file_path, backend, results, disable_progress) or {}
             else:
-                log.error("CAPA: Missed results probably")
-                return {}
-
-            capabilities = capa.capabilities.common.find_capabilities(rules, extractor, disable_progress=disable_progress)
-            # collect metadata (used only to make rendering more complete)
-            meta = capa.loader.collect_metadata([], file_path_object, FORMAT_AUTO, OS_AUTO, [path_object(rules_path)], extractor, capabilities)
-            meta.analysis.layout = capa.loader.compute_layout(rules, extractor, capabilities.matches)
-            capa_output: Any = False
-
-            # ...as python dictionary, simplified as textable but in dictionary
-            doc = rd.ResultDocument.from_capa(meta, rules, capabilities.matches)
-            capa_output = render_dictionary(doc)
-        except MemoryError:
-            log.warning("FLARE CAPA -> MemoryError")
-        except AttributeError as e:
-            log.exception(e)
-            log.warning("FLARE CAPA -> Use GitHub's version. poetry install")
-        except UnsupportedFormatError:
-            log.error("FLARE CAPA -> UnsupportedFormatError")
-        except EmptyReportError:
-            log.info("FLARE CAPA -> No process data available")
+                capa_output = run_with_timeout(_run_capa, timeout, file_path, backend, results, disable_progress) or {}
+        except TimeoutError:
+            log.warning("FLARE CAPA -> timed out after %ss, skipping (partial results)", timeout)
+            capa_output = {}
+        except ResultUnavailableError:
+            log.warning(
+                "FLARE CAPA -> analysis process died before returning a result (crash/OOM?); skipping (partial results)"
+            )
+            capa_output = {}
         except Exception as e:
             log.exception(e)
+
+    return capa_output
+
+
+# ==== render dictionary helpers
+def _run_capa(file_path: str, backend: str, results: dict, disable_progress: bool) -> Any:
+    """Run the actual FLARE-CAPA analysis (extraction + capability matching).
+
+    Extracted so it can be executed inside a forked, timeout-enforced child
+    process. Returns the rendered dictionary (or ``False`` on any error).
+    """
+    # ToDo check if PE file in TYPE
+    try:
+        file_path_object = path_object(file_path)
+        # extract features and find capabilities
+        if backend == "viv":
+            extractor = capa.loader.get_extractor(
+                file_path_object, FORMAT_AUTO, OS_AUTO, capa.loader.BACKEND_VIV, [], False, disable_progress=disable_progress
+            )
+        elif backend == "cape" and results:
+            try:
+                extractor = capa.features.extractors.cape.extractor.CapeExtractor.from_report(results)
+            except ValidationError as e:
+                log.debug("CAPA ValidationError %s", e)
+                return False
+        else:
+            log.error("CAPA: Missed results probably")
+            return False
+
+        capabilities = capa.capabilities.common.find_capabilities(rules, extractor, disable_progress=disable_progress)
+        # collect metadata (used only to make rendering more complete)
+        meta = capa.loader.collect_metadata([], file_path_object, FORMAT_AUTO, OS_AUTO, [path_object(rules_path)], extractor, capabilities)
+        meta.analysis.layout = capa.loader.compute_layout(rules, extractor, capabilities.matches)
+        capa_output: Any = False
+
+        # ...as python dictionary, simplified as textable but in dictionary
+        doc = rd.ResultDocument.from_capa(meta, rules, capabilities.matches)
+        capa_output = render_dictionary(doc)
+    except MemoryError:
+        log.warning("FLARE CAPA -> MemoryError")
+    except AttributeError as e:
+        log.exception(e)
+        log.warning("FLARE CAPA -> Use GitHub's version. poetry install")
+    except UnsupportedFormatError:
+        log.exception("FLARE CAPA -> UnsupportedFormatError")
+    except EmptyReportError:
+        log.info("FLARE CAPA -> No process data available")
+    except Exception as e:
+        log.exception(e)
 
     return capa_output
 

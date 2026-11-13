@@ -119,6 +119,10 @@ timeout = 60
 enabled = no
 # Generate it always or generate on demand only(user need to click button to generate it), still should be enabled to use this feature on demand
 on_demand = no
+# Cap the time spent running FLARE-CAPA analysis (in seconds).
+# When hit, the CAPA section is skipped and the rest of the report is generated normally (partial report).
+# 0 (default) disables the timeout and preserves the historical behaviour.
+timeout = 0
 # Analyze binary payloads
 static = no
 # Analyze CAPE payloads
